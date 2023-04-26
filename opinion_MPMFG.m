@@ -48,6 +48,10 @@ base_u = zeros(P, L+1, M+1);
 % Initial value of mean field is done below, before running the algorithm.
 % Helper function is used to specify the initial distribution, also below.
 
+% NOTE: I want to keep the same indices as the paper, so I have helper
+% functions for accessing the matrices. These also prevent any
+% out-of-bounds errors.
+
 %  --------------------------------------
 %% 2) Social network parameters/constants
 %  --------------------------------------
@@ -83,7 +87,11 @@ for p = 1:1:P % inclusive range
     for j = 0:1:L
         base_m(p,(j)+1,(0)+1) = m_0(p,j); % emphasize that indices are off by 1 on base matrices
     end
+    % normalize the mean field:
+    initial_sum = sum(base_m(p, :, 1));
+    base_m(p, :, 1) = base_m(p, :, 1)./initial_sum;
 end
+
 base_u(:) = 0.01;
 % Value function stays initialized as zero
 
@@ -93,7 +101,7 @@ for it = 1:1:max_iterations
     for p = 1:1:P
         for j=0:1:L
             for k=0:1:M-1
-                 % emphasize that indices are off by 1 on base matrices
+                % emphasize that indices are off by 1 on base matrices
                 base_m(p, (j)+1, (k+1)+1) = update_m(p, j, k);
             end
         end
@@ -102,6 +110,7 @@ for it = 1:1:max_iterations
     for p = 1:1:P
         for j=0:1:L
             for k=M:-1:2
+                % emphasize that indices are off by 1 on base matrices
                 base_v(p, (j)+1, (k-1)+1) = update_v(p, j, k);
             end
         end
@@ -112,6 +121,7 @@ for it = 1:1:max_iterations
         for j=0:1:L
             for k=0:1:M
                 [new_u, gradient] = update_u(p, j, k);
+                % emphasize that indices are off by 1 on base matrices
                 base_u(p, (j)+1, (k)+1) = new_u;
                 error = abs(gradient);
                 error_good = error_good && (error <= min_error);
@@ -193,12 +203,12 @@ end
 
 % Average population opinion at t_k, according to mean field distribution
 function retval = avg_x(p, k)
-    global avg_x0 L;
+    global avg_x0 L dx base_m;
     if 0 == k
         retval = avg_x0(p);
     else
-        opinions_arr = arrayfun(@(j) x(j), 0:1:L);
-        mean_field_arr = arrayfun(@(j) m(p, j, k), 0:1:L);
+        opinions_arr = (0:1:L).*dx; % arrayfun(@(j) x(j), 0:1:L);
+        mean_field_arr = reshape(base_m(p, :, (k)+1), size(opinions_arr)); % arrayfun(@(j) m(p, j, k), 0:1:L);
         retval = sum(opinions_arr.*mean_field_arr);
     end
 end
@@ -216,9 +226,9 @@ end
 
 % Running cost function
 function retval = r(p, j, k)
-    global c1 c2 c3 c4 P lambda desired_x avg_x0;
+    global c1 c2 c3 c4 P lambda desired_x avg_x0 base_m;
     term1 = c1*(u(p,j,k))^2;
-    mean_field_arr = arrayfun(@(l) m(l, j, k), 1:1:P);
+    mean_field_arr = base_m(:, (j)+1, (k)+1); % arrayfun(@(l) m(l, j, k), 1:1:P);
     term2 = sum(mean_field_arr.*c2);
     term3 = c3*lambda(p)*abs(x(j) - desired_x(p));
     term4 = c4*(1-lambda(p))*abs(x(j) - avg_x0(p));
@@ -240,12 +250,14 @@ end
 
 % equation 48
 function new_v = update_v(p, j, k)
-    global sigma P dx dt lambda N avg_adj c2;
+    global sigma P dx dt lambda N avg_adj c2 base_v base_m;
 
     eps = (sigma(p)^2)/2;
     
     value_arr = arrayfun(@(l) (v(l, j-1, k)-v(l, j+1, k))/(2*dx), 1:1:P);
-    mean_field_arr = arrayfun(@(l) m(l, j, k), 1:1:P);
+    % causes index error: (base_v(:, (j-1)+1, (k)+1) - base_v(:, (j+1)+1, (k)+1))./(2*dx);
+    mean_field_arr = reshape(base_m(:, (j)+1, (k)+1), size(value_arr));
+    % arrayfun(@(l) m(l, j, k), 1:1:P);
     summation = sum(mean_field_arr.*value_arr);
     
     new_v = 0.5*(v(p, j-1, k)+v(p, j+1, k))+dt*(...
